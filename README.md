@@ -1,0 +1,1 @@
+# newkursovaya-Qt-Postgres
