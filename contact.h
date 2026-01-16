@@ -1,44 +1,47 @@
 #ifndef CONTACT_H
 #define CONTACT_H
 
-#include <string>
-#include <vector>
-using namespace std;
+#include <QString>
+#include <QVector>
+#include <QDate>
 
 class Contact {
 public:
     Contact();
-    Contact(const string& first, const string& last,
-        const string& email, const string& phone);
+    Contact(const QString& first, const QString& last,
+            const QString& email, const QString& phone);
 
-    string getFirstName() const { return firstName; }
-    string getLastName() const { return lastName; }
-    string getMiddleName() const { return middleName; }
-    string getEmail() const { return email; }
-    string getBirthDate() const { return birthDate; }
-    string getAddress() const { return address; }
-    vector<string> getPhones() const { return phones; }
+    QString getFirstName() const { return firstName; }
+    QString getLastName() const { return lastName; }
+    QString getMiddleName() const { return middleName; }
+    QString getEmail() const { return email; }
+    QDate getBirthDate() const { return birthDate; }
+    QString getBirthDateString() const;
+    QString getAddress() const { return address; }
+    QVector<QString> getPhones() const { return phones; }
 
-    void setFirstName(const string& name) { firstName = name; }
-    void setLastName(const string& name) { lastName = name; }
-    void setMiddleName(const string& name) { middleName = name; }
-    void setEmail(const string& mail) { email = mail; }
-    void setBirthDate(const string& date) { birthDate = date; }
-    void setAddress(const string& addr) { address = addr; }
-    void addPhone(const string& phone) { phones.push_back(phone); }
+    void setFirstName(const QString& name) { firstName = name; }
+    void setLastName(const QString& name) { lastName = name; }
+    void setMiddleName(const QString& name) { middleName = name; }
+    void setEmail(const QString& mail) { email = mail; }
+    void setBirthDate(const QDate& date) { birthDate = date; }
+    void setBirthDate(const QString& dateStr);
+    void setAddress(const QString& addr) { address = addr; }
+    void addPhone(const QString& phone) { phones.append(phone); }
     void removePhone(int index) {
-        if (index >= 0 and index < phones.size())
-            phones.erase(phones.begin() + index);
+        if (index >= 0 && index < phones.size())
+            phones.remove(index);
     }
+    void clearPhones() { phones.clear(); }
 
 private:
-    string firstName;
-    string lastName;
-    string middleName;
-    string email;
-    string birthDate;
-    string address;
-    vector<string> phones;
+    QString firstName;
+    QString lastName;
+    QString middleName;
+    QString email;
+    QDate birthDate;
+    QString address;
+    QVector<QString> phones;
 };
 
 #endif

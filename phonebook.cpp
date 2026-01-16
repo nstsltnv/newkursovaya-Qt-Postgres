@@ -1,130 +1,135 @@
 #include "phonebook.h"
 #include "control.h"
-#include <fstream>
-#include <iostream>
-#include <sstream>
+#include <QFile>
+#include <QTextStream>
+#include <QDebug>
 #include <algorithm>
-using namespace std;
 
 PhoneBook::PhoneBook() {}
 PhoneBook::~PhoneBook() {}
 
 bool PhoneBook::addContact(const Contact& contact) {
-    if (contact.getFirstName().empty() or
-        contact.getLastName().empty() or
-        contact.getEmail().empty() or
-        contact.getPhones().empty()) {
+    if (contact.getFirstName().isEmpty() ||
+        contact.getLastName().isEmpty() ||
+        contact.getEmail().isEmpty() ||
+        contact.getPhones().isEmpty()) {
         return false;
     }
 
-    contacts.push_back(contact);
+    contacts.append(contact);
     return true;
 }
 
 bool PhoneBook::removeContact(int index) {
-    if (index < 0 or index >= contacts.size()) {
+    if (index < 0 || index >= contacts.size()) {
         return false;
     }
-    contacts.erase(contacts.begin() + index);
+    contacts.remove(index);
     return true;
 }
 
 bool PhoneBook::editContact(int index, const Contact& newContact) {
-    if (index < 0 or index >= contacts.size()) {
+    if (index < 0 || index >= contacts.size()) {
         return false;
     }
     contacts[index] = newContact;
     return true;
 }
 
-vector<Contact> PhoneBook::searchContacts(const string& query) const {
-    vector<Contact> result;
-    string lowerQuery = query;
-    transform(lowerQuery.begin(), lowerQuery.end(), lowerQuery.begin(), ::tolower);
+QVector<Contact> PhoneBook::searchContacts(const QString& query) const {
+    QVector<Contact> result;
+    QString lowerQuery = query.toLower();
 
     for (const auto& contact : contacts) {
-        string first = contact.getFirstName();
-        string last = contact.getLastName();
-        string email = contact.getEmail();
+        QString first = contact.getFirstName().toLower();
+        QString last = contact.getLastName().toLower();
+        QString email = contact.getEmail().toLower();
+        QString middle = contact.getMiddleName().toLower();
+        QString address = contact.getAddress().toLower();
 
-        transform(first.begin(), first.end(), first.begin(), ::tolower);
-        transform(last.begin(), last.end(), last.begin(), ::tolower);
-        transform(email.begin(), email.end(), email.begin(), ::tolower);
-
-        if (first.find(lowerQuery) != string::npos or
-            last.find(lowerQuery) != string::npos or
-            email.find(lowerQuery) != string::npos) {
-            result.push_back(contact);
+        if (first.contains(lowerQuery) ||
+            last.contains(lowerQuery) ||
+            email.contains(lowerQuery) ||
+            middle.contains(lowerQuery) ||
+            address.contains(lowerQuery)) {
+            result.append(contact);
         }
     }
     return result;
 }
 
-void PhoneBook::sortByField(const string& field) {
+void PhoneBook::sortByField(const QString& field) {
     if (field == "firstName") {
-        sort(contacts.begin(), contacts.end(),
+        std::sort(contacts.begin(), contacts.end(),
             [](const Contact& a, const Contact& b) {
                 return a.getFirstName() < b.getFirstName();
             });
-    }
-    else if (field == "lastName") {
-        sort(contacts.begin(), contacts.end(),
+    } else if (field == "lastName") {
+        std::sort(contacts.begin(), contacts.end(),
             [](const Contact& a, const Contact& b) {
                 return a.getLastName() < b.getLastName();
             });
-    }
-    else if (field == "email") {
-        sort(contacts.begin(), contacts.end(),
+    } else if (field == "email") {
+        std::sort(contacts.begin(), contacts.end(),
             [](const Contact& a, const Contact& b) {
                 return a.getEmail() < b.getEmail();
+            });
+    } else if (field == "birthDate") {
+        std::sort(contacts.begin(), contacts.end(),
+            [](const Contact& a, const Contact& b) {
+                return a.getBirthDate() < b.getBirthDate();
             });
     }
 }
 
-void PhoneBook::saveToFile(const string& filename) const {
-    ofstream file(filename);
-    if (!file.is_open()) {
-        cout << "Îøèáêà îòêðûòèÿ ôàéëà äëÿ çàïèñè!" << endl;
+void PhoneBook::saveToFile(const QString& filename) const {
+    QFile file(filename);
+
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        qDebug() << "ÐžÑˆÐ¸Ð±ÐºÐ° Ð¾Ñ‚ÐºÑ€Ñ‹Ñ‚Ð¸Ñ Ñ„Ð°Ð¹Ð»Ð° Ð´Ð»Ñ Ð·Ð°Ð¿Ð¸ÑÐ¸:" << file.errorString();
         return;
     }
 
+    QTextStream out(&file);
+    out.setCodec("UTF-8");
+
     for (const auto& contact : contacts) {
-        file << contact.getFirstName() << ";"
+        out << contact.getFirstName() << ";"
             << contact.getLastName() << ";"
             << contact.getMiddleName() << ";"
             << contact.getEmail() << ";"
-            << contact.getBirthDate() << ";"
+            << contact.getBirthDateString() << ";"
             << contact.getAddress() << ";";
 
         auto phones = contact.getPhones();
-        for (size_t i = 0; i < phones.size(); ++i) {
-            file << phones[i];
-            if (i < phones.size() - 1) file << ",";
+        for (int i = 0; i < phones.size(); ++i) {
+            out << phones[i];
+            if (i < phones.size() - 1) out << ",";
         }
-        file << "\n";
+        out << "\n";
     }
+
     file.close();
-    cout << "Äàííûå ñîõðàíåíû â ôàéë: " << filename << endl;
+    qDebug() << "Ð”Ð°Ð½Ð½Ñ‹Ðµ ÑÐ¾Ñ…Ñ€Ð°Ð½ÐµÐ½Ñ‹ Ð² Ñ„Ð°Ð¹Ð»:" << filename;
 }
 
-void PhoneBook::loadFromFile(const string& filename) {
-    ifstream file(filename);
-    if (!file.is_open()) {
-        cout << "Îøèáêà îòêðûòèÿ ôàéëà äëÿ ÷òåíèÿ!" << endl;
+void PhoneBook::loadFromFile(const QString& filename) {
+    QFile file(filename);
+
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        qDebug() << "ÐžÑˆÐ¸Ð±ÐºÐ° Ð¾Ñ‚ÐºÑ€Ñ‹Ñ‚Ð¸Ñ Ñ„Ð°Ð¹Ð»Ð° Ð´Ð»Ñ Ñ‡Ñ‚ÐµÐ½Ð¸Ñ:" << file.errorString();
         return;
     }
 
     contacts.clear();
-    string line;
+    QTextStream in(&file);
+    in.setCodec("UTF-8");
 
-    while (getline(file, line)) {
-        stringstream ss(line);
-        string token;
-        vector<string> tokens;
+    while (!in.atEnd()) {
+        QString line = in.readLine();
+        if (line.isEmpty()) continue;
 
-        while (getline(ss, token, ';')) {
-            tokens.push_back(token);
-        }
+        QStringList tokens = line.split(";");
 
         if (tokens.size() >= 6) {
             Contact contact;
@@ -132,22 +137,26 @@ void PhoneBook::loadFromFile(const string& filename) {
             contact.setLastName(tokens[1]);
             contact.setMiddleName(tokens[2]);
             contact.setEmail(tokens[3]);
-            contact.setBirthDate(tokens[4]);
+
+            if (!tokens[4].isEmpty()) {
+                contact.setBirthDate(tokens[4]);
+            }
+
             contact.setAddress(tokens[5]);
 
-            if (tokens.size() > 6) {
-                stringstream phoneStream(tokens[6]);
-                string phone;
-                while (getline(phoneStream, phone, ',')) {
-                    if (!phone.empty()) {
+            if (tokens.size() > 6 && !tokens[6].isEmpty()) {
+                QStringList phones = tokens[6].split(",");
+                for (const QString& phone : phones) {
+                    if (!phone.isEmpty()) {
                         contact.addPhone(phone);
                     }
                 }
             }
 
-            contacts.push_back(contact);
+            contacts.append(contact);
         }
     }
+
     file.close();
-    cout << "Äàííûå çàãðóæåíû èç ôàéëà: " << filename << endl;
+    qDebug() << "Ð”Ð°Ð½Ð½Ñ‹Ðµ Ð·Ð°Ð³Ñ€ÑƒÐ¶ÐµÐ½Ñ‹ Ð¸Ð· Ñ„Ð°Ð¹Ð»Ð°:" << filename;
 }
