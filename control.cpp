@@ -45,7 +45,7 @@ bool Control::controlEmail(const QString& email) {
 
 bool Control::controlPhone(const QString& phone) {
     QString normalized = normalizePhone(phone);
-    QRegularExpressionMatch match = phoneRegex.match(phone);
+    QRegularExpressionMatch match = phoneRegex.match(normalized);
 
     if (!match.hasMatch()) {
         return false;
@@ -83,13 +83,6 @@ QString Control::normalizeSpaces(const QString& str) {
 }
 
 QString Control::normalizePhone(const QString& phone) {
-    QString result = phone;
-
-    result = result.replace(QRegularExpression(R"([^\d\+])"), "");
-
-    if (result.startsWith("8") && result.length() == 11) {
-        result = "+7" + result.mid(1);
-    }
-
+    QString result = phone.trimmed();
     return result;
 }
