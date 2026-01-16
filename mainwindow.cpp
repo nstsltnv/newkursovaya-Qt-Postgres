@@ -5,29 +5,59 @@
 #include <QFormLayout>
 #include <QDialogButtonBox>
 #include <QDialog>
-#include <QPushButton>
-#include <QLabel>
 #include <QMessageBox>
 #include <QFileDialog>
 #include <QHeaderView>
 #include <QDebug>
-#include <QComboBox>
+#include <QMenuBar>
+#include <QMenu>
+#include <QInputDialog>
+#include <QGroupBox>
+#include <QScrollArea>
 
 MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent) {
+    : QMainWindow(parent), currentMode(FileMode), dbManager(new DBManager(this))
+{
     setupUI();
-    setWindowTitle("Телефонный справочник");
+    setupMenu();
+    setWindowTitle("Телефонный справочник [Файловый режим]");
     resize(1000, 600);
+
+    connect(dbManager, &DBManager::databaseError,
+            this, &MainWindow::onDatabaseError);
 }
 
-void MainWindow::setupUI() {
+MainWindow::~MainWindow()
+{
+    delete dbManager;
+}
+
+void MainWindow::setupMenu()
+{
+    QMenuBar *menuBar = new QMenuBar(this);
+
+    QMenu *storageMenu = menuBar->addMenu("Хранилище");
+    storageMenu->addAction("Файловый режим", this, &MainWindow::onSwitchToFileMode);
+    storageMenu->addAction("Режим базы данных", this, &MainWindow::onSwitchToDatabaseMode);
+    storageMenu->addSeparator();
+    storageMenu->addAction("Подключиться к PostgreSQL...", this, &MainWindow::onConnectToDatabase);
+
+    setMenuBar(menuBar);
+}
+
+void MainWindow::setupUI()
+{
     QWidget *centralWidget = new QWidget(this);
     QVBoxLayout *mainLayout = new QVBoxLayout(centralWidget);
+
+    statusLabel = new QLabel("Режим: Файловое хранилище");
+    statusLabel->setStyleSheet("font-weight: bold; padding: 5px; background-color: #e0e0e0;");
+    mainLayout->addWidget(statusLabel);
 
     QHBoxLayout *searchLayout = new QHBoxLayout();
     searchLayout->addWidget(new QLabel("Поиск:"));
     searchEdit = new QLineEdit();
-    searchEdit->setPlaceholderText("Имя, фамилия, email, адрес...");
+    searchEdit->setPlaceholderText("Имя, фамилия, email, телефон, адрес...");
     searchLayout->addWidget(searchEdit);
 
     QPushButton *searchButton = new QPushButton("Найти");
@@ -49,11 +79,16 @@ void MainWindow::setupUI() {
     table->setHorizontalHeaderLabels(headers);
     table->setSelectionBehavior(QAbstractItemView::SelectRows);
     table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    table->setSelectionMode(QAbstractItemView::SingleSelection);
     table->horizontalHeader()->setStretchLastSection(true);
-    table->setSortingEnabled(true);
+    table->setSortingEnabled(false);
 
-    connect(table->horizontalHeader(), &QHeaderView::sectionClicked,
-            this, &MainWindow::onSort);
+    table->setColumnWidth(0, 120);
+    table->setColumnWidth(1, 120);
+    table->setColumnWidth(2, 120);
+    table->setColumnWidth(3, 180);
+    table->setColumnWidth(4, 150);
+    table->setColumnWidth(5, 120);
 
     mainLayout->addWidget(table);
 
@@ -73,304 +108,410 @@ void MainWindow::setupUI() {
 
     buttonLayout->addStretch();
 
-    QPushButton *saveButton = new QPushButton("Сохранить");
-    connect(saveButton, &QPushButton::clicked, this, &MainWindow::onSave);
+    QPushButton *saveButton = new QPushButton("Сохранить в файл");
+    connect(saveButton, &QPushButton::clicked, this, &MainWindow::onSaveToFile);
     buttonLayout->addWidget(saveButton);
 
-    QPushButton *loadButton = new QPushButton("Загрузить");
-    connect(loadButton, &QPushButton::clicked, this, &MainWindow::onLoad);
+    QPushButton *loadButton = new QPushButton("Загрузить из файла");
+    connect(loadButton, &QPushButton::clicked, this, &MainWindow::onLoadFromFile);
     buttonLayout->addWidget(loadButton);
 
     mainLayout->addLayout(buttonLayout);
 
-    QLabel *statusLabel = new QLabel("Всего контактов: 0");
-    mainLayout->addWidget(statusLabel);
+    QHBoxLayout *sortLayout = new QHBoxLayout();
+    sortLayout->addWidget(new QLabel("Сортировка:"));
+
+    QPushButton *sortFirstNameAsc = new QPushButton("Имя ↑");
+    connect(sortFirstNameAsc, &QPushButton::clicked, this, &MainWindow::onSortFirstNameAsc);
+    sortLayout->addWidget(sortFirstNameAsc);
+
+    QPushButton *sortFirstNameDesc = new QPushButton("Имя ↓");
+    connect(sortFirstNameDesc, &QPushButton::clicked, this, &MainWindow::onSortFirstNameDesc);
+    sortLayout->addWidget(sortFirstNameDesc);
+
+    QPushButton *sortLastNameAsc = new QPushButton("Фамилия ↑");
+    connect(sortLastNameAsc, &QPushButton::clicked, this, &MainWindow::onSortLastNameAsc);
+    sortLayout->addWidget(sortLastNameAsc);
+
+    QPushButton *sortLastNameDesc = new QPushButton("Фамилия ↓");
+    connect(sortLastNameDesc, &QPushButton::clicked, this, &MainWindow::onSortLastNameDesc);
+    sortLayout->addWidget(sortLastNameDesc);
+
+    QPushButton *sortEmailAsc = new QPushButton("Email ↑");
+    connect(sortEmailAsc, &QPushButton::clicked, this, &MainWindow::onSortEmailAsc);
+    sortLayout->addWidget(sortEmailAsc);
+
+    QPushButton *sortEmailDesc = new QPushButton("Email ↓");
+    connect(sortEmailDesc, &QPushButton::clicked, this, &MainWindow::onSortEmailDesc);
+    sortLayout->addWidget(sortEmailDesc);
+
+    QPushButton *sortBirthDateAsc = new QPushButton("Дата рождения ↑");
+    connect(sortBirthDateAsc, &QPushButton::clicked, this, &MainWindow::onSortBirthDateAsc);
+    sortLayout->addWidget(sortBirthDateAsc);
+
+    QPushButton *sortBirthDateDesc = new QPushButton("Дата рождения ↓");
+    connect(sortBirthDateDesc, &QPushButton::clicked, this, &MainWindow::onSortBirthDateDesc);
+    sortLayout->addWidget(sortBirthDateDesc);
+
+    sortLayout->addStretch();
+    mainLayout->addLayout(sortLayout);
+
+    countLabel = new QLabel("Контактов: 0");
+    countLabel->setStyleSheet("font-weight: bold; padding: 5px;");
+    mainLayout->addWidget(countLabel);
 
     setCentralWidget(centralWidget);
 }
 
-void MainWindow::refreshTable() {
-    QVector<Contact> contacts = phoneBook.getAllContacts();
+void MainWindow::displayContacts(const QVector<Contact> &contacts)
+{
     table->setRowCount(contacts.size());
 
     for (int i = 0; i < contacts.size(); i++) {
-        const Contact& contact = contacts[i];
+        const Contact &contact = contacts[i];
         table->setItem(i, 0, new QTableWidgetItem(contact.getFirstName()));
         table->setItem(i, 1, new QTableWidgetItem(contact.getLastName()));
         table->setItem(i, 2, new QTableWidgetItem(contact.getMiddleName()));
         table->setItem(i, 3, new QTableWidgetItem(contact.getEmail()));
 
-        auto phones = contact.getPhones();
-        QString phoneStr;
-        for (int j = 0; j < phones.size(); j++) {
-            phoneStr += phones[j];
-            if (j < phones.size() - 1) phoneStr += "\n";
+        QString phones;
+        QVector<QString> phoneList = contact.getPhones();
+        for (int j = 0; j < phoneList.size(); j++) {
+            if (!phones.isEmpty()) phones += "\n";
+            phones += phoneList[j];
         }
-        table->setItem(i, 4, new QTableWidgetItem(phoneStr));
+        QTableWidgetItem *phoneItem = new QTableWidgetItem(phones);
+        phoneItem->setToolTip(phones);
+        table->setItem(i, 4, phoneItem);
 
         table->setItem(i, 5, new QTableWidgetItem(contact.getBirthDateString()));
         table->setItem(i, 6, new QTableWidgetItem(contact.getAddress()));
     }
 
-    QLayout *layout = centralWidget()->layout();
-    QLabel *label = qobject_cast<QLabel*>(layout->itemAt(layout->count() - 1)->widget());
-    if (label) {
-        label->setText(QString("Всего контактов: %1").arg(contacts.size()));
-    }
+    countLabel->setText(QString("Контактов: %1").arg(contacts.size()));
 }
 
-void MainWindow::onAddContact() {
-    QDialog dialog(this);
-    dialog.setWindowTitle("Добавить контакт");
-    QFormLayout *form = new QFormLayout(&dialog);
-
-    QLineEdit *firstNameEdit = new QLineEdit();
-    QLineEdit *lastNameEdit = new QLineEdit();
-    QLineEdit *middleNameEdit = new QLineEdit();
-    QLineEdit *emailEdit = new QLineEdit();
-    QLineEdit *phoneEdit = new QLineEdit();
-    QDateEdit *birthDateEdit = new QDateEdit();
-    QLineEdit *addressEdit = new QLineEdit();
-
-    birthDateEdit->setCalendarPopup(true);
-    birthDateEdit->setDisplayFormat("dd.MM.yyyy");
-    birthDateEdit->setDate(QDate::currentDate());
-    birthDateEdit->setMaximumDate(QDate::currentDate());
-
-    QLineEdit *additionalPhonesEdit = new QLineEdit();
-    additionalPhonesEdit->setPlaceholderText("Доп. телефоны через запятую");
-
-    form->addRow("Имя *:", firstNameEdit);
-    form->addRow("Фамилия *:", lastNameEdit);
-    form->addRow("Отчество:", middleNameEdit);
-    form->addRow("Email *:", emailEdit);
-    form->addRow("Телефон *:", phoneEdit);
-    form->addRow("Доп. телефоны:", additionalPhonesEdit);
-    form->addRow("Дата рождения:", birthDateEdit);
-    form->addRow("Адрес:", addressEdit);
-
-    QDialogButtonBox *buttonBox = new QDialogButtonBox(
-        QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
-        Qt::Horizontal, &dialog);
-    form->addRow(buttonBox);
-
-    connect(buttonBox, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-    connect(buttonBox, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-
-    if (dialog.exec() == QDialog::Accepted) {
-        QString firstName = Control::normalizeSpaces(firstNameEdit->text());
-        QString lastName = Control::normalizeSpaces(lastNameEdit->text());
-        QString email = Control::normalizeSpaces(emailEdit->text());
-        QString phone = phoneEdit->text();
-
-        if (!Control::controlName(firstName)) {
-            showError("Имя должно начинаться с буквы и содержать только буквы, цифры, дефисы и пробелы");
-            return;
-        }
-        if (!Control::controlName(lastName)) {
-            showError("Фамилия должна начинаться с буквы и содержать только буквы, цифры, дефисы и пробелы");
-            return;
-        }
-        if (!Control::controlEmail(email)) {
-            showError("Неверный формат email");
-            return;
-        }
-        if (!Control::controlPhone(phone)) {
-            showError("Неверный формат телефона. Примеры: +78121234567, 8(812)123-45-67");
-            return;
-        }
-
-        Contact contact(firstName, lastName, email, Control::normalizePhone(phone));
-
-        QString middleName = Control::normalizeSpaces(middleNameEdit->text());
-        if (!middleName.isEmpty()) {
-            if (!Control::controlName(middleName)) {
-                showError("Отчество должно начинаться с буквы");
-                return;
-            }
-            contact.setMiddleName(middleName);
-        }
-
-        QDate birthDate = birthDateEdit->date();
-        if (birthDate.isValid() && birthDate != QDate::currentDate()) {
-            if (!Control::controlBirthDate(birthDate)) {
-                showError("Дата рождения не может быть в будущем");
-                return;
-            }
-            contact.setBirthDate(birthDate);
-        }
-
-        QString address = addressEdit->text().trimmed();
-        if (!address.isEmpty()) {
-            contact.setAddress(address);
-        }
-
-        QString additionalPhones = additionalPhonesEdit->text();
-        if (!additionalPhones.isEmpty()) {
-            QStringList phones = additionalPhones.split(",", Qt::SkipEmptyParts);
-            for (QString& phone : phones) {
-                phone = phone.trimmed();
-                if (Control::controlPhone(phone)) {
-                    contact.addPhone(Control::normalizePhone(phone));
-                } else {
-                    showError(QString("Неверный формат телефона: %1").arg(phone));
-                    return;
-                }
-            }
-        }
-
-        if (phoneBook.addContact(contact)) {
-            refreshTable();
-            showSuccess("Контакт добавлен!");
-        }
-    }
-}
-
-void MainWindow::onDeleteContact() {
-    int row = table->currentRow();
-    if (row >= 0) {
-        QMessageBox::StandardButton reply;
-        reply = QMessageBox::question(this, "Подтверждение",
-                                     "Удалить выбранный контакт?",
-                                     QMessageBox::Yes | QMessageBox::No);
-        if (reply == QMessageBox::Yes) {
-            if (phoneBook.removeContact(row)) {
-                refreshTable();
-                showSuccess("Контакт удален");
-            }
-        }
+void MainWindow::refreshTable()
+{
+    if (currentMode == FileMode) {
+        QVector<Contact> contacts = phoneBook.getAllContacts();
+        displayContacts(contacts);
     } else {
-        showError("Выберите контакт для удаления");
+        if (dbManager->isConnected()) {
+            QVector<Contact> contacts = dbManager->getAllContacts();
+            displayContacts(contacts);
+        } else {
+            countLabel->setText("Не подключено к базе данных");
+            table->setRowCount(0);
+        }
     }
 }
 
-void MainWindow::onEditContact() {
+void MainWindow::onAddContact()
+{
+    Contact contact;
+    if (showContactDialog(contact, "Добавление контакта")) {
+        bool success = false;
+
+        if (currentMode == FileMode) {
+            success = phoneBook.addContact(contact);
+            if (success) {
+                refreshTable();
+                showSuccess("Контакт добавлен");
+            } else {
+                showError("Не удалось добавить контакт");
+            }
+        } else {
+            success = dbManager->addContact(contact);
+            if (success) {
+                refreshTable();
+                showSuccess("Контакт добавлен в базу данных");
+            } else {
+                showError("Не удалось добавить контакт в базу данных");
+            }
+        }
+    }
+}
+
+void MainWindow::onDeleteContact()
+{
+    int row = table->currentRow();
+    if (row < 0) {
+        showError("Выберите контакт для удаления");
+        return;
+    }
+
+    QMessageBox::StandardButton reply;
+    reply = QMessageBox::question(this, "Подтверждение",
+                                 "Удалить выбранный контакт?",
+                                 QMessageBox::Yes | QMessageBox::No);
+    if (reply == QMessageBox::Yes) {
+        bool success = false;
+
+        if (currentMode == FileMode) {
+            success = phoneBook.removeContact(row);
+        } else {
+            int contactId = dbManager->getContactIdByRow(row);
+            if (contactId > 0) {
+                success = dbManager->deleteContact(contactId);
+            } else {
+                showError("Не удалось получить ID контакта");
+                return;
+            }
+        }
+
+        if (success) {
+            refreshTable();
+            showSuccess("Контакт удален");
+        } else {
+            showError("Не удалось удалить контакт");
+        }
+    }
+}
+
+void MainWindow::onEditContact()
+{
     int row = table->currentRow();
     if (row < 0) {
         showError("Выберите контакт для редактирования");
         return;
     }
 
-    QVector<Contact> contacts = phoneBook.getAllContacts();
-    if (row >= contacts.size()) return;
+    Contact contact;
 
-    Contact contact = contacts[row];
-
-    QDialog dialog(this);
-    dialog.setWindowTitle("Редактировать контакт");
-    QFormLayout *form = new QFormLayout(&dialog);
-
-    QLineEdit *firstNameEdit = new QLineEdit(contact.getFirstName());
-    QLineEdit *lastNameEdit = new QLineEdit(contact.getLastName());
-    QLineEdit *middleNameEdit = new QLineEdit(contact.getMiddleName());
-    QLineEdit *emailEdit = new QLineEdit(contact.getEmail());
-    QLineEdit *phoneEdit = new QLineEdit();
-    QDateEdit *birthDateEdit = new QDateEdit();
-    QLineEdit *addressEdit = new QLineEdit(contact.getAddress());
-
-    birthDateEdit->setCalendarPopup(true);
-    birthDateEdit->setDisplayFormat("dd.MM.yyyy");
-    birthDateEdit->setDate(contact.getBirthDate());
-    birthDateEdit->setMaximumDate(QDate::currentDate());
-
-    auto phones = contact.getPhones();
-    if (!phones.isEmpty()) {
-        phoneEdit->setText(phones[0]);
-    }
-
-    QLineEdit *additionalPhonesEdit = new QLineEdit();
-    QString additionalPhones;
-    for (int i = 1; i < phones.size(); i++) {
-        if (i > 1) additionalPhones += ", ";
-        additionalPhones += phones[i];
-    }
-    additionalPhonesEdit->setText(additionalPhones);
-
-    form->addRow("Имя *:", firstNameEdit);
-    form->addRow("Фамилия *:", lastNameEdit);
-    form->addRow("Отчество:", middleNameEdit);
-    form->addRow("Email *:", emailEdit);
-    form->addRow("Телефон *:", phoneEdit);
-    form->addRow("Доп. телефоны:", additionalPhonesEdit);
-    form->addRow("Дата рождения:", birthDateEdit);
-    form->addRow("Адрес:", addressEdit);
-
-    QDialogButtonBox *buttonBox = new QDialogButtonBox(
-        QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
-        Qt::Horizontal, &dialog);
-    form->addRow(buttonBox);
-
-    connect(buttonBox, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-    connect(buttonBox, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-
-    if (dialog.exec() == QDialog::Accepted) {
-        QString firstName = Control::normalizeSpaces(firstNameEdit->text());
-        QString lastName = Control::normalizeSpaces(lastNameEdit->text());
-        QString email = Control::normalizeSpaces(emailEdit->text());
-        QString phone = phoneEdit->text();
-
-        if (!Control::controlName(firstName) ||
-            !Control::controlName(lastName) ||
-            !Control::controlEmail(email) ||
-            !Control::controlPhone(phone)) {
-            showError("Неверные данные");
+    if (currentMode == FileMode) {
+        QVector<Contact> contacts = phoneBook.getAllContacts();
+        if (row >= contacts.size()) {
+            showError("Неверный индекс контакта");
             return;
         }
-
-        Contact newContact(firstName, lastName, email, Control::normalizePhone(phone));
-        newContact.setMiddleName(Control::normalizeSpaces(middleNameEdit->text()));
-        newContact.setBirthDate(birthDateEdit->date());
-        newContact.setAddress(addressEdit->text().trimmed());
-
-        QString additionalPhones = additionalPhonesEdit->text();
-        if (!additionalPhones.isEmpty()) {
-            QStringList phones = additionalPhones.split(",", Qt::SkipEmptyParts);
-            for (QString& phone : phones) {
-                phone = phone.trimmed();
-                if (Control::controlPhone(phone)) {
-                    newContact.addPhone(Control::normalizePhone(phone));
-                }
-            }
+        contact = contacts[row];
+    } else {
+        int contactId = dbManager->getContactIdByRow(row);
+        if (contactId <= 0) {
+            showError("Не удалось получить контакт");
+            return;
         }
+        contact = dbManager->getContactById(contactId);
+    }
 
-        if (phoneBook.editContact(row, newContact)) {
-            refreshTable();
-            showSuccess("Контакт обновлен");
+    if (showContactDialog(contact, "Редактирование контакта")) {
+        bool success = false;
+
+        if (currentMode == FileMode) {
+            success = phoneBook.editContact(row, contact);
+            if (success) {
+                refreshTable();
+                showSuccess("Контакт обновлен");
+            } else {
+                showError("Не удалось обновить контакт");
+            }
+        } else {
+            int contactId = dbManager->getContactIdByRow(row);
+            if (contactId > 0) {
+                success = dbManager->updateContact(contactId, contact);
+                if (success) {
+                    refreshTable();
+                    showSuccess("Контакт обновлен в базе данных");
+                } else {
+                    showError("Не удалось обновить контакт в базе данных");
+                }
+            } else {
+                showError("Не удалось получить ID контакта");
+            }
         }
     }
 }
 
-void MainWindow::onSearch() {
+bool MainWindow::showContactDialog(Contact &contact, const QString &title)
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle(title);
+    dialog.setModal(true);
+    dialog.resize(600, 500);
+
+    QVBoxLayout *mainLayout = new QVBoxLayout(&dialog);
+
+    // Основные поля
+    QFormLayout *formLayout = new QFormLayout();
+
+    QLineEdit *firstNameEdit = new QLineEdit(contact.getFirstName());
+    firstNameEdit->setPlaceholderText("Иван");
+    formLayout->addRow("Имя*:", firstNameEdit);
+
+    QLineEdit *lastNameEdit = new QLineEdit(contact.getLastName());
+    lastNameEdit->setPlaceholderText("Иванов");
+    formLayout->addRow("Фамилия*:", lastNameEdit);
+
+    QLineEdit *middleNameEdit = new QLineEdit(contact.getMiddleName());
+    middleNameEdit->setPlaceholderText("Иванович");
+    formLayout->addRow("Отчество:", middleNameEdit);
+
+    QLineEdit *emailEdit = new QLineEdit(contact.getEmail());
+    emailEdit->setPlaceholderText("example@mail.com");
+    formLayout->addRow("Email*:", emailEdit);
+
+    QLineEdit *birthDateEdit = new QLineEdit(contact.getBirthDateString());
+    birthDateEdit->setPlaceholderText("дд.мм.гггг");
+    formLayout->addRow("Дата рождения:", birthDateEdit);
+
+    QLineEdit *addressEdit = new QLineEdit(contact.getAddress());
+    addressEdit->setPlaceholderText("г. Москва, ул. Пушкина, д. 1");
+    formLayout->addRow("Адрес:", addressEdit);
+
+    mainLayout->addLayout(formLayout);
+
+    // Телефоны
+    QGroupBox *phoneGroup = new QGroupBox("Телефоны*");
+    QVBoxLayout *phoneLayout = new QVBoxLayout(phoneGroup);
+
+    QVector<QString> phones = contact.getPhones();
+    QList<QLineEdit*> phoneEdits;
+
+    for (const QString &phone : phones) {
+        QLineEdit *phoneEdit = new QLineEdit(phone);
+        phoneEdit->setPlaceholderText("+7 (999) 123-45-67");
+        phoneLayout->addWidget(phoneEdit);
+        phoneEdits.append(phoneEdit);
+    }
+
+    // Если телефонов нет, добавляем одно поле
+    if (phoneEdits.isEmpty()) {
+        QLineEdit *phoneEdit = new QLineEdit();
+        phoneEdit->setPlaceholderText("+7 (999) 123-45-67");
+        phoneLayout->addWidget(phoneEdit);
+        phoneEdits.append(phoneEdit);
+    }
+
+    QHBoxLayout *phoneButtonLayout = new QHBoxLayout();
+    QPushButton *addPhoneButton = new QPushButton("+ Добавить телефон");
+    QPushButton *removePhoneButton = new QPushButton("- Удалить телефон");
+    phoneButtonLayout->addWidget(addPhoneButton);
+    phoneButtonLayout->addWidget(removePhoneButton);
+    phoneButtonLayout->addStretch();
+    phoneLayout->addLayout(phoneButtonLayout);
+
+    mainLayout->addWidget(phoneGroup);
+
+    // Кнопки диалога
+    QDialogButtonBox *buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    mainLayout->addWidget(buttonBox);
+
+    connect(buttonBox, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttonBox, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+    connect(addPhoneButton, &QPushButton::clicked, &dialog, [phoneLayout, &phoneEdits]() {
+        QLineEdit *phoneEdit = new QLineEdit();
+        phoneEdit->setPlaceholderText("+7 (999) 123-45-67");
+        phoneLayout->insertWidget(phoneLayout->count() - 1, phoneEdit);
+        phoneEdits.append(phoneEdit);
+    });
+
+    connect(removePhoneButton, &QPushButton::clicked, &dialog, [phoneLayout, &phoneEdits]() {
+        if (phoneEdits.size() > 1) {
+            QLineEdit *lastEdit = phoneEdits.takeLast();
+            phoneLayout->removeWidget(lastEdit);
+            delete lastEdit;
+        }
+    });
+
+    if (dialog.exec() == QDialog::Accepted) {
+        // Валидация
+        QString firstName = firstNameEdit->text().trimmed();
+        QString lastName = lastNameEdit->text().trimmed();
+        QString email = emailEdit->text().trimmed();
+
+        if (firstName.isEmpty()) {
+            showError("Имя обязательно для заполнения");
+            return false;
+        }
+
+        if (lastName.isEmpty()) {
+            showError("Фамилия обязательна для заполнения");
+            return false;
+        }
+
+        if (!Control::controlEmail(email)) {
+            showError("Неверный формат email");
+            return false;
+        }
+
+        // Собираем телефоны
+        QStringList phoneList;
+        bool hasValidPhone = false;
+        for (QLineEdit *phoneEdit : phoneEdits) {
+            QString phone = phoneEdit->text().trimmed();
+            if (!phone.isEmpty()) {
+                if (Control::controlPhone(phone)) {
+                    phoneList.append(phone);
+                    hasValidPhone = true;
+                } else {
+                    showError("Неверный формат телефона: " + phone);
+                    return false;
+                }
+            }
+        }
+
+        if (!hasValidPhone) {
+            showError("Добавьте хотя бы один телефон");
+            return false;
+        }
+
+        // Обновляем контакт
+        contact.setFirstName(firstName);
+        contact.setLastName(lastName);
+        contact.setMiddleName(middleNameEdit->text().trimmed());
+        contact.setEmail(email);
+
+        QString birthDate = birthDateEdit->text().trimmed();
+        if (!birthDate.isEmpty()) {
+            if (Control::controlBirthDateString(birthDate)) {
+                contact.setBirthDate(birthDate);
+            } else {
+                showError("Неверная дата рождения");
+                return false;
+            }
+        }
+
+        contact.setAddress(addressEdit->text().trimmed());
+
+        // Очищаем старые телефоны и добавляем новые
+        contact.clearPhones();
+        for (const QString &phone : phoneList) {
+            contact.addPhone(phone);
+        }
+
+        return true;
+    }
+
+    return false;
+}
+
+void MainWindow::onSearch()
+{
     QString query = searchEdit->text().trimmed();
     if (query.isEmpty()) {
         refreshTable();
         return;
     }
 
-    QVector<Contact> results = phoneBook.searchContacts(query);
-    table->setRowCount(results.size());
-
-    for (int i = 0; i < results.size(); i++) {
-        const Contact& contact = results[i];
-        table->setItem(i, 0, new QTableWidgetItem(contact.getFirstName()));
-        table->setItem(i, 1, new QTableWidgetItem(contact.getLastName()));
-        table->setItem(i, 2, new QTableWidgetItem(contact.getMiddleName()));
-        table->setItem(i, 3, new QTableWidgetItem(contact.getEmail()));
-
-        auto phones = contact.getPhones();
-        QString phoneStr;
-        for (int j = 0; j < phones.size(); j++) {
-            phoneStr += phones[j];
-            if (j < phones.size() - 1) phoneStr += "\n";
-        }
-        table->setItem(i, 4, new QTableWidgetItem(phoneStr));
-
-        table->setItem(i, 5, new QTableWidgetItem(contact.getBirthDateString()));
-        table->setItem(i, 6, new QTableWidgetItem(contact.getAddress()));
+    QVector<Contact> results;
+    if (currentMode == FileMode) {
+        results = phoneBook.searchContacts(query);
+    } else {
+        results = dbManager->searchContacts(query);
     }
+
+    displayContacts(results);
 }
 
-void MainWindow::onSave() {
+void MainWindow::onSaveToFile()
+{
+    if (currentMode != FileMode) {
+        showError("Сохранение в файл доступно только в файловом режиме");
+        return;
+    }
+
     QString filename = QFileDialog::getSaveFileName(this, "Сохранить файл",
                                                    "contacts.txt",
                                                    "Текстовые файлы (*.txt)");
@@ -380,7 +521,13 @@ void MainWindow::onSave() {
     }
 }
 
-void MainWindow::onLoad() {
+void MainWindow::onLoadFromFile()
+{
+    if (currentMode != FileMode) {
+        showError("Загрузка из файла доступна только в файловом режиме");
+        return;
+    }
+
     QString filename = QFileDialog::getOpenFileName(this, "Загрузить файл",
                                                    "",
                                                    "Текстовые файлы (*.txt)");
@@ -391,24 +538,185 @@ void MainWindow::onLoad() {
     }
 }
 
-void MainWindow::onSort(int column) {
-    QString field;
-    switch (column) {
-        case 0: field = "firstName"; break;
-        case 1: field = "lastName"; break;
-        case 3: field = "email"; break;
-        case 5: field = "birthDate"; break;
-        default: return;
-    }
+void MainWindow::onConnectToDatabase()
+{
+    bool ok;
 
-    phoneBook.sortByField(field);
-    refreshTable();
+    QString host = QInputDialog::getText(this, "Подключение к PostgreSQL",
+                                        "Хост (обычно localhost):", QLineEdit::Normal,
+                                        "localhost", &ok);
+    if (!ok) return;
+
+    int port = QInputDialog::getInt(this, "Подключение к PostgreSQL",
+                                   "Порт (обычно 5432):", 5432, 1, 65535, 1, &ok);
+    if (!ok) return;
+
+    QString dbName = QInputDialog::getText(this, "Подключение к PostgreSQL",
+                                          "Имя базы данных:", QLineEdit::Normal,
+                                          "phonebook_db", &ok);
+    if (!ok) return;
+
+    QString user = QInputDialog::getText(this, "Подключение к PostgreSQL",
+                                        "Пользователь:", QLineEdit::Normal,
+                                        "postgres", &ok);
+    if (!ok) return;
+
+    QString password = QInputDialog::getText(this, "Подключение к PostgreSQL",
+                                           "Пароль:", QLineEdit::Password,
+                                           "", &ok);
+    if (!ok) return;
+
+    if (dbManager->connectToDatabase(host, port, dbName, user, password)) {
+        currentMode = DatabaseMode;
+        updateStatus();
+        refreshTable();
+        showSuccess("Успешное подключение к PostgreSQL!");
+    } else {
+        showError("Не удалось подключиться к PostgreSQL");
+    }
 }
 
-void MainWindow::showError(const QString& message) {
+void MainWindow::onSwitchToFileMode()
+{
+    currentMode = FileMode;
+    updateStatus();
+    refreshTable();
+    showSuccess("Переключено на файловый режим");
+}
+
+void MainWindow::onSwitchToDatabaseMode()
+{
+    currentMode = DatabaseMode;
+    updateStatus();
+    refreshTable();
+
+    if (!dbManager->isConnected()) {
+        showError("Не подключено к базе данных. Используйте 'Подключиться к PostgreSQL...'");
+    }
+}
+
+void MainWindow::onDatabaseError(const QString &error)
+{
+    showError("Ошибка базы данных:\n" + error);
+}
+
+// Слоты сортировки
+void MainWindow::onSortFirstNameAsc()
+{
+    if (currentMode == FileMode) {
+        phoneBook.sortByField("firstName");
+        refreshTable();
+    } else if (dbManager->isConnected()) {
+        QVector<Contact> contacts = dbManager->getContactsSorted("firstName", true);
+        displayContacts(contacts);
+    }
+}
+
+void MainWindow::onSortFirstNameDesc()
+{
+    if (currentMode == FileMode) {
+        phoneBook.sortByField("firstName");
+        refreshTable();
+    } else if (dbManager->isConnected()) {
+        QVector<Contact> contacts = dbManager->getContactsSorted("firstName", false);
+        displayContacts(contacts);
+    }
+}
+
+void MainWindow::onSortLastNameAsc()
+{
+    if (currentMode == FileMode) {
+        phoneBook.sortByField("lastName");
+        refreshTable();
+    } else if (dbManager->isConnected()) {
+        QVector<Contact> contacts = dbManager->getContactsSorted("lastName", true);
+        displayContacts(contacts);
+    }
+}
+
+void MainWindow::onSortLastNameDesc()
+{
+    if (currentMode == FileMode) {
+        phoneBook.sortByField("lastName");
+        refreshTable();
+    } else if (dbManager->isConnected()) {
+        QVector<Contact> contacts = dbManager->getContactsSorted("lastName", false);
+        displayContacts(contacts);
+    }
+}
+
+void MainWindow::onSortEmailAsc()
+{
+    if (currentMode == FileMode) {
+        phoneBook.sortByField("email");
+        refreshTable();
+    } else if (dbManager->isConnected()) {
+        QVector<Contact> contacts = dbManager->getContactsSorted("email", true);
+        displayContacts(contacts);
+    }
+}
+
+void MainWindow::onSortEmailDesc()
+{
+    if (currentMode == FileMode) {
+        phoneBook.sortByField("email");
+        refreshTable();
+    } else if (dbManager->isConnected()) {
+        QVector<Contact> contacts = dbManager->getContactsSorted("email", false);
+        displayContacts(contacts);
+    }
+}
+
+void MainWindow::onSortBirthDateAsc()
+{
+    if (currentMode == FileMode) {
+        phoneBook.sortByField("birthDate");
+        refreshTable();
+    } else if (dbManager->isConnected()) {
+        QVector<Contact> contacts = dbManager->getContactsSorted("birthDate", true);
+        displayContacts(contacts);
+    }
+}
+
+void MainWindow::onSortBirthDateDesc()
+{
+    if (currentMode == FileMode) {
+        phoneBook.sortByField("birthDate");
+        refreshTable();
+    } else if (dbManager->isConnected()) {
+        QVector<Contact> contacts = dbManager->getContactsSorted("birthDate", false);
+        displayContacts(contacts);
+    }
+}
+
+void MainWindow::showError(const QString &message)
+{
     QMessageBox::critical(this, "Ошибка", message);
 }
 
-void MainWindow::showSuccess(const QString& message) {
+void MainWindow::showSuccess(const QString &message)
+{
     QMessageBox::information(this, "Успех", message);
+}
+
+void MainWindow::updateStatus()
+{
+    QString status;
+    QString title = "Телефонный справочник";
+
+    if (currentMode == FileMode) {
+        status = "Режим: Файловое хранилище";
+        title += " [Файловый режим]";
+    } else {
+        if (dbManager->isConnected()) {
+            status = "Режим: PostgreSQL (подключено)";
+            title += " [PostgreSQL]";
+        } else {
+            status = "Режим: PostgreSQL (не подключено)";
+            title += " [PostgreSQL - не подключено]";
+        }
+    }
+
+    statusLabel->setText(status);
+    setWindowTitle(title);
 }
