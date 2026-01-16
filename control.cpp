@@ -1,153 +1,94 @@
 #include "control.h"
-#include <iostream>
-#include <algorithm>
-using namespace std;
+#include <QDebug>
 
-bool Control::controlName(const string& name) {
-    if (name.empty()) return false;
+const QRegularExpression Control::nameRegex(
+    R"(^[A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё0-9]*(?:[-\s][A-Za-zА-Яа-яЁё0-9]+)*$)"
+);
 
-    string trimmed = name;
-    size_t start = trimmed.find_first_not_of(" ");
-    size_t end = trimmed.find_last_not_of(" ");
-    if (start != string::npos and end != string::npos) {
-        trimmed = trimmed.substr(start, end - start + 1);
-    }
+const QRegularExpression Control::emailRegex(
+    R"(^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$)"
+);
 
-    if (trimmed.empty()) return false;
+const QRegularExpression Control::phoneRegex(
+    R"(^(\+7|8)[\s\-]?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}$)"
+);
 
-    unsigned char first = trimmed[0];
-    if (!((first >= 'A' and first <= 'Z') or
-        (first >= 'a' and first <= 'z') or
-        (first >= 192 and first <= 255))) {
+bool Control::controlName(const QString& name) {
+    QString trimmed = normalizeSpaces(name);
+    if (trimmed.isEmpty()) return false;
+
+    QRegularExpressionMatch match = nameRegex.match(trimmed);
+    if (!match.hasMatch()) {
         return false;
     }
 
-    unsigned char last = trimmed[trimmed.length() - 1];
-    if (last == '-') return false;
-
-    for (char c : trimmed) {
-        unsigned char uc = c;
-        if (!((uc >= 'A' and uc <= 'Z') or
-            (uc >= 'a' and uc <= 'z') or
-            (uc >= '0' and uc <= '9') or
-            (uc >= 192 and uc <= 255) or
-            uc == '-' or uc == ' ')) {
-            return false;
-        }
-    }
-
-    if (trimmed.find("--") != string::npos) return false;
-
-    return true;
-}
-
-bool Control::controlEmail(const string& email) {
-    string normalized = normalizeSpaces(email);
-
-    if (normalized.empty()) return false;
-
-    int atPos = normalized.find('@');
-    if (atPos == string::npos or atPos == 0 or atPos == normalized.length() - 1) {
+    if (trimmed.startsWith('-') || trimmed.endsWith('-')) {
         return false;
     }
 
-    string username = normalized.substr(0, atPos);
-    string domain = normalized.substr(atPos + 1);
-
-    for (char c : username) {
-        if (!isalnum(c) and c != '.' and c != '_' and c != '%' and c != '+' and c != '-') {
-            return false;
-        }
-    }
-
-    if (domain.find('.') == string::npos) {
+    if (trimmed.contains("--")) {
         return false;
-    }
-
-    for (char c : domain) {
-        if (!isalnum(c) and c != '.' and c != '-') {
-            return false;
-        }
     }
 
     return true;
 }
 
-bool Control::controlPhone(const string& phone) {
-    string normalized = normalizePhone(phone);
+bool Control::controlEmail(const QString& email) {
+    QString normalized = normalizeSpaces(email);
+    if (normalized.isEmpty()) return false;
 
-    if (normalized.empty()) return false;
+    normalized = normalized.replace(" @", "@").replace("@ ", "@");
 
-    if (normalized[0] != '+' and !isdigit(normalized[0])) {
+    QRegularExpressionMatch match = emailRegex.match(normalized);
+    return match.hasMatch();
+}
+
+bool Control::controlPhone(const QString& phone) {
+    QString normalized = normalizePhone(phone);
+    QRegularExpressionMatch match = phoneRegex.match(phone);
+
+    if (!match.hasMatch()) {
         return false;
     }
 
-    for (size_t i = 1; i < normalized.length(); i++) {
-        if (!isdigit(normalized[i])) {
-            return false;
-        }
+    normalized = normalized.replace(QRegularExpression(R"([\s\(\)\-])"), "");
+
+    if (normalized.startsWith("+7")) {
+        return normalized.length() == 12;
+    } else if (normalized.startsWith("8")) {
+        return normalized.length() == 11;
     }
 
-    if (normalized[0] == '+') {
-        if (normalized.length() != 12) return false;
-    }
-    else {
-        if (normalized.length() != 11) return false;
-    }
+    return false;
+}
+
+bool Control::controlBirthDate(const QDate& date) {
+    if (!date.isValid()) return true;
+
+    QDate current = QDate::currentDate();
+    if (date > current) return false;
 
     return true;
 }
 
-bool Control::controlBirthDate(const string& date) {
-    if (date.empty()) return true;
+bool Control::controlBirthDateString(const QString& date) {
+    if (date.isEmpty()) return true;
 
-    if (date.length() != 10) return false;
-    if (date[2] != '.' or date[5] != '.') return false;
-
-    for (int i = 0; i < 10; i++) {
-        if (i != 2 and i != 5 and !isdigit(date[i])) {
-            return false;
-        }
-    }
-
-    return true;
+    QDate d = QDate::fromString(date, "dd.MM.yyyy");
+    return controlBirthDate(d);
 }
 
-string Control::normalizeSpaces(const string& str) {
-    string result = str;
-
-    size_t start = result.find_first_not_of(" \t\n\r");
-    size_t end = result.find_last_not_of(" \t\n\r");
-
-    if (start == string::npos) return "";
-
-    result = result.substr(start, end - start + 1);
-
-    size_t atPos = result.find('@');
-    if (atPos != string::npos) {
-        while (atPos > 0 and isspace(result[atPos - 1])) {
-            result.erase(atPos - 1, 1);
-            atPos--;
-        }
-        while (atPos + 1 < result.length() and isspace(result[atPos + 1])) {
-            result.erase(atPos + 1, 1);
-        }
-    }
-
-    return result;
+QString Control::normalizeSpaces(const QString& str) {
+    return str.trimmed();
 }
 
-string Control::normalizePhone(const string& phone) {
-    string result;
+QString Control::normalizePhone(const QString& phone) {
+    QString result = phone;
 
-    for (size_t i = 0; i < phone.length(); i++) {
-        char c = phone[i];
-        if (isdigit(c) or (i == 0 and c == '+')) {
-            result += c;
-        }
-    }
-    if (result.length() == 11 and result[0] == '8') {
-        result = "+7" + result.substr(1);
+    result = result.replace(QRegularExpression(R"([^\d\+])"), "");
+
+    if (result.startsWith("8") && result.length() == 11) {
+        result = "+7" + result.mid(1);
     }
 
     return result;
